@@ -44,10 +44,10 @@ These layers communicate through stable contracts: data model, REST/SSE API shap
 | Backend framework | Spring Boot |
 | Agent framework | Spring AI with `ChatClient`, tool calling, structured outputs, and optional MCP client support |
 | LLM provider | Qwen Cloud through OpenAI-compatible endpoint |
-| Planner / judgment model | Larger Qwen model for planning, decisioning, and rubric scoring |
-| Extraction / classification model | Faster Qwen model for claim extraction and high-volume subtasks |
+| Planner / judgment model | Environment-configured Qwen model for planning, decisioning, and rubric scoring |
+| Extraction / classification model | Environment-configured faster Qwen model for claim extraction and high-volume subtasks |
 | Frontend | Next.js, React, Tailwind CSS, shadcn/ui |
-| Database | PostgreSQL, optionally with pgvector |
+| Database | ApsaraDB RDS PostgreSQL preferred; Postgres on ECS acceptable for demo, optionally with pgvector |
 | Object storage | Alibaba Cloud OSS |
 | Sandbox | Docker on Alibaba Cloud ECS |
 | Deployment target | Alibaba Cloud, preferably `ap-southeast-1` |
@@ -58,7 +58,49 @@ These layers communicate through stable contracts: data model, REST/SSE API shap
 
 ---
 
-## 4. High-Level System Architecture
+## 4. MVP Tech Stack and Workflow
+
+### 4.1 Stack
+
+The MVP uses a Spring Boot backend because it cleanly combines REST APIs, persistence, background orchestration, and Spring AI tool calling. Qwen Cloud is accessed through an OpenAI-compatible client so model names, base URL, and API key are deployment configuration rather than code constants.
+
+The frontend is a Next.js dashboard with Tailwind CSS and shadcn/ui. The backend owns the system of record in PostgreSQL. Alibaba Cloud OSS stores larger artifacts and sandbox logs. Docker on Alibaba Cloud ECS runs the single supported sandbox ecosystem.
+
+Required runtime configuration:
+
+```text
+QWEN_BASE_URL
+QWEN_API_KEY
+QWEN_PLANNER_MODEL
+QWEN_EXTRACTOR_MODEL
+DATABASE_URL
+OSS_ENDPOINT
+OSS_BUCKET
+OSS_ACCESS_KEY_ID
+OSS_ACCESS_KEY_SECRET
+GITHUB_TOKEN
+APP_BASE_URL
+SCHEDULING_SIGNING_SECRET
+```
+
+### 4.2 Workflow
+
+1. Hiring user creates a job, rubric, and interview slots.
+2. Candidate submits resume text and work links.
+3. Backend persists the candidate and queues an `AgentRun`.
+4. Qwen extracts structured claims from the submission.
+5. The agent calls tools to harvest GitHub metadata, commit history, contributors, fork state, and repository structure.
+6. Deterministic tools compute authorship and originality signals.
+7. Sandbox runner executes one supported repository in a constrained container.
+8. Qwen proposes claim-to-evidence links.
+9. Deterministic verifier validates pointers and assigns claim statuses.
+10. Qwen scores the credibility profile against the rubric and writes a structured recommendation.
+11. Hiring user reviews the trace, confirms or overrides the recommendation, and the audit log records the action.
+12. A signed scheduling link is surfaced and the candidate books an interview slot.
+
+---
+
+## 5. High-Level System Architecture
 
 ```mermaid
 flowchart TB
@@ -146,9 +188,9 @@ flowchart TB
 
 ---
 
-## 5. Component Responsibilities
+## 6. Component Responsibilities
 
-### 5.1 Frontend
+### 6.1 Frontend
 
 The frontend provides the hiring control plane.
 
@@ -168,7 +210,7 @@ Responsibilities:
 
 ---
 
-### 5.2 API Layer
+### 6.2 API Layer
 
 The API layer exposes REST endpoints for platform operations and trace endpoints for live or near-live updates.
 
@@ -184,7 +226,7 @@ Responsibilities:
 
 ---
 
-### 5.3 Run Orchestrator
+### 6.3 Run Orchestrator
 
 The run orchestrator manages the lifecycle of candidate verification.
 
@@ -201,7 +243,7 @@ Responsibilities:
 
 ---
 
-### 5.4 Agent Loop
+### 6.4 Agent Loop
 
 The agent loop is responsible for planning, tool selection, claim extraction, evidence interpretation, and decision composition.
 
@@ -221,7 +263,7 @@ The agent does not directly mark a claim as verified. Verification state is assi
 
 ---
 
-### 5.5 Verification Engine
+### 6.5 Verification Engine
 
 The verification engine performs deterministic and semi-deterministic checks over candidate artifacts.
 
@@ -238,7 +280,7 @@ Responsibilities:
 
 ---
 
-### 5.6 Tool Layer
+### 6.6 Tool Layer
 
 Tools are typed capabilities callable by the agent or verification engine.
 
@@ -259,7 +301,7 @@ Required tools:
 
 ---
 
-### 5.7 Data Layer
+### 6.7 Data Layer
 
 PostgreSQL is the system of record.
 
@@ -281,7 +323,7 @@ Alibaba Cloud OSS stores large or raw artifacts:
 
 ---
 
-## 6. Agent Run Lifecycle
+## 7. Agent Run Lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -314,7 +356,7 @@ CANCELLED
 
 ---
 
-## 7. Agent Orchestration Flow
+## 8. Agent Orchestration Flow
 
 ```mermaid
 flowchart LR
@@ -341,7 +383,7 @@ flowchart LR
 
 ---
 
-## 8. Claim Verification Flow
+## 9. Claim Verification Flow
 
 ```mermaid
 flowchart TB
@@ -380,7 +422,7 @@ CONTRADICTED
 
 ---
 
-## 9. Sandbox Architecture
+## 10. Sandbox Architecture
 
 The sandbox is responsible for executing untrusted candidate code safely. It uses a two-phase model to separate dependency preparation from proof execution.
 
@@ -405,7 +447,7 @@ flowchart TB
     TEARDOWN --> DONE["Return Sandbox Result"]
 ```
 
-### 9.1 Phase A — Dependency Preparation
+### 10.1 Phase A — Dependency Preparation
 
 Dependency preparation may use controlled network access only for dependency fetching.
 
@@ -415,10 +457,12 @@ Required constraints:
 - Strict maximum download size.
 - Registry allowlisting where feasible.
 - No access to backend secrets.
+- Package-manager lifecycle hooks disabled where feasible.
 - No candidate code execution beyond dependency preparation commands required for the supported ecosystem.
+- Dependency commands, lockfile state, network outcome, and blocked hooks are recorded.
 - Output is a prepared dependency cache, lockfile snapshot, or build environment.
 
-### 9.2 Phase B — Proof Execution
+### 10.2 Phase B — Proof Execution
 
 Proof execution runs candidate code with maximum isolation.
 
@@ -434,9 +478,14 @@ Required constraints:
 - Disk limit.
 - Wall-clock timeout.
 - Single-use container.
+- Not privileged.
+- Docker socket not mounted.
+- Backend secrets and cloud credentials absent.
+- Unnecessary Linux capabilities dropped.
+- Seccomp/AppArmor or equivalent host controls where feasible.
 - Container destroyed after execution.
 
-### 9.3 Sandbox Statuses
+### 10.3 Sandbox Statuses
 
 ```text
 EXECUTION_PASSED
@@ -453,7 +502,7 @@ Sandbox outcomes are non-disqualifying. They contribute to claim confidence and 
 
 ---
 
-## 10. Data Model
+## 11. Data Model
 
 ```mermaid
 erDiagram
@@ -485,7 +534,7 @@ erDiagram
 
 ---
 
-## 11. Core Entities
+## 12. Core Entities
 
 ### JobPosting
 
@@ -676,7 +725,7 @@ Includes:
 
 ---
 
-## 12. Tool Contract
+## 13. Tool Contract
 
 Each tool uses a typed request and response with a common result envelope.
 
@@ -717,7 +766,7 @@ Tool implementation requirements:
 
 ---
 
-## 13. API Surface
+## 14. API Surface
 
 ### 13.1 REST Resources
 
@@ -768,7 +817,7 @@ GET /agent-runs/{agentRunId}/tool-calls
 
 ---
 
-## 14. End-to-End Technical Flow
+## 15. End-to-End Technical Flow
 
 ```mermaid
 sequenceDiagram
@@ -833,7 +882,7 @@ sequenceDiagram
 
 ---
 
-## 15. Concurrency Model
+## 16. Concurrency Model
 
 ```mermaid
 flowchart TB
@@ -868,7 +917,7 @@ Concurrency requirements:
 
 ---
 
-## 16. Deployment Architecture
+## 17. Deployment Architecture
 
 ```mermaid
 flowchart LR
@@ -903,10 +952,11 @@ flowchart LR
 - OSS stores sandbox logs and larger artifacts.
 - DirectMail is optional for the demo if dashboard-visible scheduling links are implemented.
 - Environment variables are used for secrets and API keys.
+- Deployment proof must include a public URL or health response, Alibaba Cloud runtime evidence, and OSS/database evidence with secrets hidden.
 
 ---
 
-## 17. Security Architecture
+## 18. Security Architecture
 
 ```mermaid
 flowchart TB
@@ -944,10 +994,12 @@ Security requirements:
 - Magic links are signed and time-limited.
 - Slot booking is atomic.
 - Overrides and automated actions are audit-logged.
+- Candidate PII is minimized in fixtures and logs.
+- The product presents evidence-backed recommendations, not automatic final employment decisions.
 
 ---
 
-## 18. Observability and Audit
+## 19. Observability and Audit
 
 The trace and audit system is built into the persistence model.
 
@@ -978,7 +1030,7 @@ flowchart LR
 
 ---
 
-## 19. Development Workstream Boundary
+## 20. Development Workstream Boundary
 
 ```mermaid
 flowchart TB
@@ -1025,7 +1077,7 @@ Development boundary:
 
 ---
 
-## 20. Demo Architecture Path
+## 21. Demo Architecture Path
 
 The demo should exercise the following vertical slice:
 
@@ -1057,7 +1109,7 @@ Required demo fixtures:
 
 ---
 
-## 21. Failure Handling
+## 22. Failure Handling
 
 ### 21.1 Tool Failure Classes
 
@@ -1100,7 +1152,7 @@ Failure-handling requirements:
 
 ---
 
-## 22. Scope Control
+## 23. Scope Control
 
 The architecture is optimized for a narrow hackathon implementation.
 
@@ -1133,7 +1185,7 @@ Cuttable components:
 
 ---
 
-## 23. Repository Documentation Requirements
+## 24. Repository Documentation Requirements
 
 The repository should include:
 
@@ -1167,7 +1219,7 @@ The README should identify:
 
 ---
 
-## 24. Architecture Summary
+## 25. Architecture Summary
 
 Receipts is a human-controlled verification agent for hiring. Its architecture combines a Qwen-powered agent loop, deterministic evidence validation, GitHub forensic analysis, sandbox proof-of-execution, a persistent trace/audit model, and a dashboard-first hiring workflow.
 

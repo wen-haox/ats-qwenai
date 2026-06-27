@@ -3,7 +3,7 @@
 **Project:** Receipts — Proof-of-Execution Hiring Agent  
 **Hackathon:** Qwen Cloud Global AI Hackathon  
 **Track:** Track 4 — Autopilot Agent  
-**Submission Deadline:** July 9, 2026
+**Submission Deadline:** July 9, 2026 at 5:00pm EDT / 2:00pm PDT
 
 ---
 
@@ -18,6 +18,18 @@ The core product invariant is:
 > A claim is not marked as verified because a model says so. A claim is marked as verified only when deterministic code confirms that a concrete evidence pointer exists and supports the claim.
 
 Receipts is designed as a human-controlled agentic workflow: every automated decision is explainable, overridable, and audit-logged.
+
+### 1.1 Hackathon Fit
+
+Receipts is scoped for Track 4 — Autopilot Agent. The product intentionally covers an end-to-end hiring workflow: messy candidate inputs, external work-artifact retrieval, tool-based verification, model-assisted planning and scoring, human review checkpoints, and interview scheduling.
+
+The final submission must demonstrate:
+
+- Qwen Cloud API usage for planning, extraction, structured outputs, decisioning, and rubric scoring.
+- Tool use against external systems, especially GitHub and sandbox execution.
+- Human-in-the-loop checkpoints through dashboard review and override.
+- Alibaba Cloud deployment proof for the backend and supporting services.
+- Public source, open license, architecture documentation, and a short public demo video.
 
 ---
 
@@ -115,6 +127,19 @@ Sandbox execution failures must not automatically reject a candidate. Execution 
 ### 6.5 Narrow Demo Scope
 
 The hackathon version must prioritize a reliable vertical slice over broad feature coverage. The winning demo path is evidence harvesting, authorship/originality analysis, sandbox execution, claim verification, fit decision, human override, and scheduling link.
+
+### 6.6 MVP Golden Path
+
+The implementation MVP is one reliable golden path, not a full recruiting suite:
+
+1. One hiring role with a fixed weighted rubric.
+2. One known-good candidate fixture with resume text and one supported GitHub repository.
+3. One weak/forked candidate fixture that exposes unsupported or contradicted claims.
+4. One supported sandbox ecosystem.
+5. One persisted agent run from intake to credibility profile, decision, override, audit log, and scheduling link.
+6. One Alibaba Cloud deployment proof path.
+
+Any feature that does not strengthen this path is lower priority than demo reliability.
 
 ---
 
@@ -247,6 +272,9 @@ Sandbox execution is required for the hackathon demo and must support one ecosys
 | FR-F12 | System stores sandbox logs and artifacts in object storage. | P0 |
 | FR-F13 | System destroys sandbox containers after each run and never reuses them. | P0 |
 | FR-F14 | System treats unsupported ecosystems as non-disqualifying. | P0 |
+| FR-F15 | Sandbox containers must not run privileged, mount the Docker socket, or receive backend secrets. | P0 |
+| FR-F16 | Sandbox execution drops unnecessary Linux capabilities and uses seccomp/AppArmor or equivalent host controls where feasible. | P0 |
+| FR-F17 | Dependency preparation records package-manager commands, lockfile state, network outcome, and any blocked lifecycle hooks. | P0 |
 
 ### 13.1 Sandbox Phases
 
@@ -255,6 +283,7 @@ Sandbox execution is required for the hackathon demo and must support one ecosys
 - Network may be enabled only for controlled dependency preparation.
 - Dependency fetch must have strict timeout and size limits.
 - Package registry access should be allowlisted where feasible.
+- Package-manager lifecycle hooks should be disabled where feasible. If an ecosystem requires hooks, that run must be explicitly labeled higher risk.
 - The output is a prepared dependency cache, lockfile snapshot, or build environment for the execution phase.
 
 #### Phase B — Proof Execution
@@ -263,6 +292,10 @@ Sandbox execution is required for the hackathon demo and must support one ecosys
 - Code runs as a non-root user.
 - Root filesystem is read-only where feasible.
 - Writable area is temporary and isolated.
+- Container is not privileged.
+- Docker socket and host paths are not mounted.
+- Backend secrets and cloud credentials are not present in the sandbox environment.
+- Unnecessary Linux capabilities are dropped.
 - CPU, memory, PID, disk, and wall-clock limits are enforced.
 - Build, test, or smoke-test commands are executed.
 - Logs and outcomes are captured and persisted.
@@ -772,7 +805,22 @@ TIMEOUT
 
 ---
 
-## 25. Non-Functional Requirements
+## 25. Qwen Cloud Usage Requirements
+
+Qwen Cloud usage must be visible in both implementation and demo:
+
+| ID | Requirement | Priority |
+|---|---|---|
+| QR-1 | `QWEN_BASE_URL`, `QWEN_API_KEY`, `QWEN_PLANNER_MODEL`, and `QWEN_EXTRACTOR_MODEL` are environment-configured. | P0 |
+| QR-2 | Planner and decision steps use a stronger configured Qwen model through the OpenAI-compatible API. | P0 |
+| QR-3 | Extraction and classification steps use a cheaper or faster configured Qwen model where quality is sufficient. | P1 |
+| QR-4 | Claim extraction, claim-evidence linking, and decisions use structured JSON outputs validated by application schemas. | P0 |
+| QR-5 | Tool-call prompts and responses are persisted in `ToolCall` or agent-step records with model name and latency. | P0 |
+| QR-6 | Demo trace clearly shows where Qwen planned actions, proposed links, and generated the decision rationale. | P0 |
+
+---
+
+## 26. Non-Functional Requirements
 
 | ID | Category | Requirement |
 |---|---|---|
@@ -791,7 +839,7 @@ TIMEOUT
 
 ---
 
-## 26. Concurrency and Orchestration Requirements
+## 27. Concurrency and Orchestration Requirements
 
 | ID | Requirement | Priority |
 |---|---|---|
@@ -804,7 +852,7 @@ TIMEOUT
 
 ---
 
-## 27. Security Requirements
+## 28. Security, Privacy, and Fairness Requirements
 
 | ID | Requirement | Priority |
 |---|---|---|
@@ -816,10 +864,16 @@ TIMEOUT
 | SEC-6 | Magic links must be signed and time-limited. | P0 |
 | SEC-7 | Slot booking must be atomic to prevent double-booking. | P0 |
 | SEC-8 | Human overrides must be audit-logged. | P0 |
+| SEC-9 | Candidate PII must be limited to demo-required fields and must not be sent to tools unnecessarily. | P0 |
+| SEC-10 | Logs and demo fixtures must avoid real candidate personal data unless explicit consent exists. | P0 |
+| SEC-11 | The system must present decisions as evidence-backed recommendations, not automatic final employment decisions. | P0 |
+| SEC-12 | The profile must display uncertainty and missing-evidence notes when evidence is incomplete. | P0 |
+| SEC-13 | Protected-class, demographic, school-prestige-only, or pedigree-only signals must not be used for scoring. | P0 |
+| SEC-14 | Audit events must record which actor confirmed or overrode an automated recommendation. | P0 |
 
 ---
 
-## 28. Demo Requirements
+## 29. Demo Requirements
 
 The demo must show the following end-to-end flow:
 
@@ -839,9 +893,11 @@ The demo must show the following end-to-end flow:
 14. Audit log shows the automated and human actions.
 15. Demo briefly shows Alibaba Cloud deployment proof.
 
+Target demo video length is under three minutes for Devpost friendliness. The broader challenge page allows a longer maximum, but the project should use the stricter three-minute script unless organizers clarify otherwise.
+
 ---
 
-## 29. Required Demo Fixtures
+## 30. Required Demo Fixtures
 
 The project must include or prepare the following fixtures:
 
@@ -857,7 +913,7 @@ The project must include or prepare the following fixtures:
 
 ---
 
-## 30. Cut Lines
+## 31. Cut Lines
 
 If implementation falls behind, features must be cut in the following order:
 
@@ -874,20 +930,19 @@ If implementation falls behind, features must be cut in the following order:
 
 The following must not be cut:
 
-- GitHub evidence harvesting.
-- Authorship analysis.
-- Fork/originality detection.
-- Sandbox proof-of-execution for one ecosystem.
-- Evidence-linked claim verification.
-- Fit decision against rubric.
-- Human override.
-- Audit log.
-- Magic-link scheduling flow or dashboard-visible scheduling link.
+- One fixture-backed GitHub evidence harvest.
+- One authorship/originality result for a candidate repository.
+- One sandbox proof-of-execution result for the selected ecosystem.
+- Evidence-linked claim verification for at least three claims.
+- One rubric-backed fit decision.
+- Human review with confirm or override.
+- Audit log entries for automated actions and human review.
+- Dashboard-visible scheduling link with one successful booking.
 - Alibaba Cloud deployment proof.
 
 ---
 
-## 31. Milestones
+## 32. Milestones
 
 ### Day 1 — Integration Spike
 
@@ -973,13 +1028,14 @@ Required output:
 - Public repository is complete.
 - README includes setup, architecture, deployment, and demo instructions.
 - Architecture diagram is included.
-- Demo video is recorded.
+- Public demo video is recorded and kept under three minutes where possible.
 - Devpost submission text is finalized.
 - Track is clearly identified.
+- Any required presentation material is exported and linked from the submission.
 
 ---
 
-## 32. Success Metrics
+## 33. Success Metrics
 
 | Metric | Target |
 |---|---|
@@ -994,7 +1050,7 @@ Required output:
 
 ---
 
-## 33. Submission Requirements
+## 34. Submission Requirements
 
 The final submission must include:
 
@@ -1002,10 +1058,12 @@ The final submission must include:
 - `README.md` with setup and run instructions.
 - `prd.md`.
 - Architecture diagram.
-- Demo video.
+- Public demo video, targeting under three minutes unless organizers explicitly accept a longer cut.
 - Track identification: Track 4 — Autopilot Agent.
 - Description of Qwen Cloud usage.
 - Description of Alibaba Cloud deployment.
 - Proof of deployed backend on Alibaba Cloud.
 - License file.
 - Demo fixtures or instructions for reproducing the demo.
+- Technical workflow summary.
+- Presentation deck or exported slides if required by the submission form.
